@@ -2,9 +2,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <winsock2.h>
+#include <windows.h>
 
 #define SERVER_PORT 12345
 #define BUFFER_SIZE 1024
+#define MAX_CLIENTS 10
+
+SOCKET clients[MAX_CLIENTS];
+int clientCount = 0;
+CRITICAL_SECTION cs;
 
 void initializeSock(){
     WSADATA wsaData;
@@ -49,41 +55,63 @@ void listenClients(SOCKET serverSocket){
     printf("Server listening on port %d..\n",SERVER_PORT);
 }
 
-void handleClient(SOCKET clientServer){
+DWORD WINAPI handleClient(LPVOID socketDesc) {
+    SOCKET clientSocket = *(SOCKET*)socketDesc;
     char buffer[BUFFER_SIZE];
-    int bytesRecieved;
+    int bytesReceived;
 
-    while ((bytesRecieved = recv(clientServer,buffer,sizeof(buffer),0)) >0){
-        buffer[bytesRecieved] = '\0';
-        printf("Client:%s\n",buffer);
-        send(clientServer,buffer,bytesRecieved,0);
+    while ((bytesReceived = recv(clientSocket, buffer, sizeof(buffer), 0)) > 0) {
+        EnterCriticalSection(&cs);
+        for (int i = 0; i < clientCount; i++) {
+            if (clients[i] != clientSocket) {
+                send(clients[i], buffer, bytesReceived, 0);
+            }
+        }
+
+        LeaveCriticalSection(&cs);
     }
-    if(bytesRecieved ==0){
-        printf("client disconnected\n");
-    }else{
-        printf("recv failed with error %ld\n",WSAGetLastError());
+
+    EnterCriticalSection(&cs);
+    for (int i = 0; i < clientCount; i++) {
+        
+        if (clients[i] == clientSocket) {
+            for (int j = i; j < clientCount - 1; j++) {
+                clients[j] = clients[j + 1];
+            }
+            clientCount--;
+            break;
+        }
     }
-    closesocket(clientServer);
+    LeaveCriticalSection(&cs);
+    closesocket(clientSocket);
 }
+
+
 
 int main(){
     initializeSock();
     SOCKET serverSocket = createServerSocket();
     bindSocket(serverSocket);
     listenClients(serverSocket);
+    InitializeCriticalSection(&cs);
+    struct sockaddr_in clAddr;
+    int addrLen = sizeof(clAddr);
 
     while(1){
-        struct sockaddr_in claddr;
-        int claddr_size = sizeof(claddr);
-        SOCKET clientServer = accept(serverSocket,(struct sockaddr*)&claddr,&claddr_size);
-
-        if(clientServer == INVALID_SOCKET){
-            printf("Accept failed with error %ld\n",WSAGetLastError());
+        SOCKET clientSocket = accept(serverSocket,(struct sockaddr*)&clAddr,&addrLen);
+        EnterCriticalSection(&cs);
+        if(clientCount < MAX_CLIENTS){
+            clients[clientCount++] = clientSocket;
+            SOCKET *pClient = &clients[clientCount - 1];
+            CreateThread(NULL,0,handleClient,pClient,0,NULL);
         }else{
-            printf("client connected\n");
-            handleClient(clientServer);
+            char *msg = "Server full!.. try later\n";
+            send(clientSocket,msg,strlen(msg),0);
+            closesocket(clientSocket);
         }
+        LeaveCriticalSection(&cs);
     }
+    DeleteCriticalSection(&cs);
     closesocket(serverSocket);
     WSACleanup();
     
