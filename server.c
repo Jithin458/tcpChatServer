@@ -79,8 +79,6 @@ DWORD WINAPI handleClient(LPVOID clientInfoPtr) {
         }
         LeaveCriticalSection(&cs);
     }
-
-
     EnterCriticalSection(&cs);
     for (int i = 0; i < clientCount; i++) {
         if (clients[i].socket == clientSocket) {
@@ -92,13 +90,10 @@ DWORD WINAPI handleClient(LPVOID clientInfoPtr) {
         }
     }
     LeaveCriticalSection(&cs);
-
     printf("Client disconnected.\n");
     closesocket(clientSocket);
     return 0;
 }
-
-
 
 
 int main(){
