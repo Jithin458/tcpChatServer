@@ -7,8 +7,15 @@
 #define SERVER_PORT 12345
 #define BUFFER_SIZE 1024
 #define MAX_CLIENTS 10
+typedef struct {
+    SOCKET socket;
+    char name[BUFFER_SIZE];
+} ClientInfo;
 
-SOCKET clients[MAX_CLIENTS];
+ClientInfo clients[MAX_CLIENTS];
+
+
+
 int clientCount = 0;
 CRITICAL_SECTION cs;
 
@@ -55,26 +62,28 @@ void listenClients(SOCKET serverSocket){
     printf("Server listening on port %d..\n",SERVER_PORT);
 }
 
-DWORD WINAPI handleClient(LPVOID socketDesc) {
-    SOCKET clientSocket = *(SOCKET*)socketDesc;
+DWORD WINAPI handleClient(LPVOID clientInfoPtr) {
+    ClientInfo* client = (ClientInfo*)clientInfoPtr;
+    SOCKET clientSocket = client->socket;
     char buffer[BUFFER_SIZE];
     int bytesReceived;
 
     while ((bytesReceived = recv(clientSocket, buffer, sizeof(buffer), 0)) > 0) {
+        buffer[bytesReceived] = '\0';  
+
         EnterCriticalSection(&cs);
         for (int i = 0; i < clientCount; i++) {
-            if (clients[i] != clientSocket) {
-                send(clients[i], buffer, bytesReceived, 0);
+            if (clients[i].socket != clientSocket) {
+                send(clients[i].socket, buffer, strlen(buffer), 0);
             }
         }
-
         LeaveCriticalSection(&cs);
     }
 
+
     EnterCriticalSection(&cs);
     for (int i = 0; i < clientCount; i++) {
-        
-        if (clients[i] == clientSocket) {
+        if (clients[i].socket == clientSocket) {
             for (int j = i; j < clientCount - 1; j++) {
                 clients[j] = clients[j + 1];
             }
@@ -83,8 +92,12 @@ DWORD WINAPI handleClient(LPVOID socketDesc) {
         }
     }
     LeaveCriticalSection(&cs);
+
+    printf("Client disconnected.\n");
     closesocket(clientSocket);
+    return 0;
 }
+
 
 
 
@@ -101,8 +114,8 @@ int main(){
         SOCKET clientSocket = accept(serverSocket,(struct sockaddr*)&clAddr,&addrLen);
         EnterCriticalSection(&cs);
         if(clientCount < MAX_CLIENTS){
-            clients[clientCount++] = clientSocket;
-            SOCKET *pClient = &clients[clientCount - 1];
+            clients[clientCount++].socket = clientSocket;
+            ClientInfo *pClient = &clients[clientCount - 1];
             CreateThread(NULL,0,handleClient,pClient,0,NULL);
         }else{
             char *msg = "Server full!.. try later\n";
